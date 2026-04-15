@@ -15,6 +15,7 @@ export type ChartCardProps = {
   contentHeight?: number;
   avatar?: React.ReactNode;
   style?: React.CSSProperties;
+  variant?: 'filled' | 'borderless' | undefined;
 } & CardProps;
 
 const ChartCard: React.FC<ChartCardProps> = (props) => {
@@ -91,10 +92,21 @@ const ChartCard: React.FC<ChartCardProps> = (props) => {
     );
   };
 
-  const { loading = false, ...rest } = props;
+  const {
+    loading = false,
+    action,
+    contentHeight,
+    total,
+    footer,
+    bordered,
+    ...rest
+  } = props;
+  // 将 bordered 属性转换为 variant 属性
+  const variant = bordered === false ? 'borderless' : rest.variant;
   return (
     <Card
       loading={loading}
+      variant={variant}
       styles={{
         body: {
           padding: '20px 24px 8px 24px',

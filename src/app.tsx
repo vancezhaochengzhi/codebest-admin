@@ -16,8 +16,7 @@ import defaultSettings from '../config/defaultSettings';
 import { errorConfig } from './requestErrorConfig';
 import '@ant-design/v5-patch-for-react-19';
 
-const isDev =
-  process.env.NODE_ENV === 'development' || process.env.CI;
+const isDev = process.env.NODE_ENV === 'development' || process.env.CI;
 const loginPath = '/user/login';
 
 /**
@@ -29,25 +28,51 @@ export async function getInitialState(): Promise<{
   loading?: boolean;
   fetchUserInfo?: () => Promise<API.CurrentUser | undefined>;
 }> {
-  const fetchUserInfo = async () => {
+  const fetchUserInfo = async (): Promise<API.CurrentUser | undefined> => {
     try {
-      const msg = await queryCurrentUser({
+      const res = await queryCurrentUser({
         skipErrorHandler: true,
       });
-      return msg.data;
+      // yudao 框架：code = 0 表示成功
+      if (res.code === 0 && res.data) {
+        // 后端返回 AuthPermissionInfoRespVO，转换为前端 CurrentUser
+        const { user, roles, permissions } = res.data;
+        if (user) {
+          return {
+            name: user.nickname,
+            avatar: user.avatar,
+            userid: user.id?.toString(),
+            email: user.email,
+            roles,
+            permissions,
+          };
+        }
+        return undefined;
+      }
+      // token 无效或已过期
+      if (res.code !== undefined && res.code !== 0) {
+        localStorage.removeItem('token');
+        return undefined;
+      }
     } catch (_error) {
-      history.push(loginPath);
+      localStorage.removeItem('token');
     }
     return undefined;
   };
-  // 如果不是登录页面，执行
+  // 始终尝试获取用户信息（无论当前页面）
+  const currentUser = await fetchUserInfo();
+
+  // 如果不是登录页面，需要检查登录状态
   const { location } = history;
   if (
     ![loginPath, '/user/register', '/user/register-result'].includes(
       location.pathname,
     )
   ) {
-    const currentUser = await fetchUserInfo();
+    if (!currentUser) {
+      // 未登录且访问非登录页面，跳转到登录页
+      history.push(loginPath);
+    }
     return {
       fetchUserInfo,
       currentUser,
@@ -56,6 +81,7 @@ export async function getInitialState(): Promise<{
   }
   return {
     fetchUserInfo,
+    currentUser,
     settings: defaultSettings as Partial<LayoutSettings>,
   };
 }
@@ -83,8 +109,13 @@ export const layout: RunTimeLayoutConfig = ({
     footerRender: () => <Footer />,
     onPageChange: () => {
       const { location } = history;
-      // 如果没有登录，重定向到 login
-      if (!initialState?.currentUser && location.pathname !== loginPath) {
+      // 如果没有登录且访问非登录页面，重定向到 login
+      // 注意：getInitialState 已经处理了大部分情况，这里只是兜底
+      if (
+        !initialState?.currentUser &&
+        location.pathname !== loginPath &&
+        !['/user/register', '/user/register-result'].includes(location.pathname)
+      ) {
         history.push(loginPath);
       }
     },
@@ -151,6 +182,6 @@ export const layout: RunTimeLayoutConfig = ({
  * @doc https://umijs.org/docs/max/request#配置
  */
 export const request: RequestConfig = {
-  baseURL: 'https://proapi.azurewebsites.net',
+  baseURL: process.env.REACT_APP_API_URL || '',
   ...errorConfig,
 };

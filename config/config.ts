@@ -180,5 +180,6 @@ export default defineConfig({
   exportStatic: {},
   define: {
     'process.env.CI': process.env.CI,
+    'process.env.REACT_APP_API_URL': process.env.REACT_APP_API_URL,
   },
 });

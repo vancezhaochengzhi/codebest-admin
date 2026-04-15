@@ -2,8 +2,8 @@ import {
   AlipayCircleOutlined,
   LockOutlined,
   MobileOutlined,
-  TaobaoCircleOutlined,
   UserOutlined,
+  WechatOutlined,
   WeiboCircleOutlined,
 } from '@ant-design/icons';
 import {
@@ -19,13 +19,24 @@ import {
   useIntl,
   useModel,
 } from '@umijs/max';
+import { Captcha } from 'aj-captcha-react';
 import { Alert, App, Tabs } from 'antd';
 import { createStyles } from 'antd-style';
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { Footer } from '@/components';
-import { login } from '@/services/ant-design-pro/api';
-import { getFakeCaptcha } from '@/services/ant-design-pro/login';
+import {
+  login,
+  SocialType,
+  smsLogin,
+  socialAuthRedirect,
+  socialLogin,
+} from '@/services/ant-design-pro/api';
+import {
+  checkCaptcha,
+  getCaptcha,
+  sendSmsCode,
+} from '@/services/ant-design-pro/login';
 import Settings from '../../../../config/defaultSettings';
 
 const useStyles = createStyles(({ token }) => {
@@ -64,22 +75,40 @@ const useStyles = createStyles(({ token }) => {
   };
 });
 
+/** 社交登录图标：点击后跳转到第三方 OAuth 授权页 */
 const ActionIcons = () => {
   const { styles } = useStyles();
 
+  const handleSocialLogin = async (type: number) => {
+    try {
+      // 回调地址为当前登录页，带上 socialType 以便回调时识别
+      const redirectUri = `${window.location.origin}/user/login?socialType=${type}`;
+      const res = await socialAuthRedirect({ type, redirectUri });
+      if (res.code === 0 && res.data) {
+        // 跳转到第三方授权页
+        window.location.href = res.data;
+      }
+    } catch (error) {
+      console.error('获取社交登录授权地址失败:', error);
+    }
+  };
+
   return (
     <>
+      <WechatOutlined
+        key="WechatOutlined"
+        className={styles.action}
+        onClick={() => handleSocialLogin(SocialType.WECHAT_OPEN)}
+      />
       <AlipayCircleOutlined
         key="AlipayCircleOutlined"
         className={styles.action}
-      />
-      <TaobaoCircleOutlined
-        key="TaobaoCircleOutlined"
-        className={styles.action}
+        onClick={() => handleSocialLogin(SocialType.ALIPAY)}
       />
       <WeiboCircleOutlined
         key="WeiboCircleOutlined"
         className={styles.action}
+        onClick={() => handleSocialLogin(SocialType.WEIBO)}
       />
     </>
   );
@@ -111,12 +140,16 @@ const LoginMessage: React.FC<{
 };
 
 const Login: React.FC = () => {
-  const [userLoginState, setUserLoginState] = useState<API.LoginResult>({});
+  const [userLoginState, setUserLoginState] = useState<
+    API.CommonResult<API.LoginResult>
+  >({ code: 0, data: undefined });
   const [type, setType] = useState<string>('account');
   const { initialState, setInitialState } = useModel('@@initialState');
   const { styles } = useStyles();
   const { message } = App.useApp();
   const intl = useIntl();
+  const captchaRef = useRef<any>(null);
+  const [loginValues, setLoginValues] = useState<API.LoginParams | null>(null);
 
   const fetchUserInfo = async () => {
     const userInfo = await initialState?.fetchUserInfo?.();
@@ -127,26 +160,131 @@ const Login: React.FC = () => {
           currentUser: userInfo,
         }));
       });
+      return userInfo;
     }
+    return undefined;
   };
 
+  // 社交登录回调处理：第三方平台授权后重定向回来带有 code/state/socialType 参数
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const code = urlParams.get('code');
+    const state = urlParams.get('state');
+    const socialTypeStr = urlParams.get('socialType');
+    if (code && state && socialTypeStr) {
+      // 清除 URL 中的社交登录参数，避免重复触发
+      window.history.replaceState({}, '', '/user/login');
+      // 调用社交登录接口
+      (async () => {
+        try {
+          const res = await socialLogin({
+            type: Number(socialTypeStr),
+            code,
+            state,
+          });
+          if (res.code === 0 && res.data) {
+            if (res.data.accessToken) {
+              localStorage.setItem('token', res.data.accessToken);
+            }
+            message.success(
+              intl.formatMessage({
+                id: 'pages.login.success',
+                defaultMessage: '登录成功！',
+              }),
+            );
+            const userInfo = await fetchUserInfo();
+            if (userInfo) {
+              window.location.href = '/';
+            }
+          } else {
+            message.error(res.msg || '社交登录失败');
+          }
+        } catch (error) {
+          message.error('社交登录失败，请重试');
+        }
+      })();
+    }
+  }, []);
+
   const handleSubmit = async (values: API.LoginParams) => {
+    if (type === 'mobile') {
+      // 短信登录不需要图形验证码，直接调用短信登录接口
+      await handleSmsLogin(values as any);
+      return;
+    }
+    // 账号密码登录：保存登录数据，触发图形验证码
+    setLoginValues(values);
+    captchaRef.current?.verify();
+  };
+
+  // 短信验证码登录
+  const handleSmsLogin = async (values: {
+    mobile: string;
+    captcha: string;
+  }) => {
     try {
-      // 登录
-      const msg = await login({ ...values, type });
-      if (msg.status === 'ok') {
-        const defaultLoginSuccessMessage = intl.formatMessage({
-          id: 'pages.login.success',
-          defaultMessage: '登录成功！',
-        });
-        message.success(defaultLoginSuccessMessage);
+      const msg = await smsLogin({
+        mobile: values.mobile,
+        code: values.captcha,
+      });
+      if (msg.code === 0 && msg.data) {
+        if (msg.data.accessToken) {
+          localStorage.setItem('token', msg.data.accessToken);
+        }
+        message.success(
+          intl.formatMessage({
+            id: 'pages.login.success',
+            defaultMessage: '登录成功！',
+          }),
+        );
         await fetchUserInfo();
         const urlParams = new URL(window.location.href).searchParams;
         window.location.href = urlParams.get('redirect') || '/';
         return;
       }
-      console.log(msg);
-      // 如果失败去设置用户错误信息
+      setUserLoginState(msg);
+    } catch (error) {
+      message.error(
+        intl.formatMessage({
+          id: 'pages.login.failure',
+          defaultMessage: '登录失败，请重试！',
+        }),
+      );
+    }
+  };
+
+  // 验证码验证成功后的回调
+  const handleCaptchaSuccess = async (data: any) => {
+    if (!loginValues) return;
+
+    // data 包含 captchaVerification 等验证信息
+    const captchaVerification = data?.captchaVerification || data?.repKey;
+
+    if (!captchaVerification) {
+      message.error('验证码数据格式错误');
+      return;
+    }
+
+    try {
+      // 使用验证后的 captchaVerification 进行登录
+      const msg = await login({ ...loginValues, captchaVerification });
+      // yudao 框架：code = 0 表示成功
+      if (msg.code === 0 && msg.data) {
+        // 保存 token 到 localStorage
+        if (msg.data.accessToken) {
+          localStorage.setItem('token', msg.data.accessToken);
+        }
+        message.success(
+          intl.formatMessage({
+            id: 'pages.login.success',
+            defaultMessage: '登录成功！',
+          }),
+        );
+        await fetchUserInfo();
+        const urlParams = new URL(window.location.href).searchParams;
+        window.location.href = urlParams.get('redirect') || '/';
+        return;
+      }
       setUserLoginState(msg);
     } catch (error) {
       const defaultLoginFailureMessage = intl.formatMessage({
@@ -157,7 +295,9 @@ const Login: React.FC = () => {
       message.error(defaultLoginFailureMessage);
     }
   };
-  const { status, type: loginType } = userLoginState;
+  const { code, msg, data } = userLoginState;
+  // 登录失败时显示错误信息
+  const loginError = code !== undefined && code !== 0 && msg ? msg : undefined;
 
   return (
     <div className={styles.container}>
@@ -183,7 +323,7 @@ const Login: React.FC = () => {
             maxWidth: '75vw',
           }}
           logo={<img alt="logo" src="/logo.svg" />}
-          title="Ant Design"
+          title="Code Best"
           subTitle={intl.formatMessage({
             id: 'pages.layouts.userLayout.title',
           })}
@@ -224,7 +364,7 @@ const Login: React.FC = () => {
             ]}
           />
 
-          {status === 'error' && loginType === 'account' && (
+          {loginError && type === 'account' && (
             <LoginMessage
               content={intl.formatMessage({
                 id: 'pages.login.accountLogin.errorMessage',
@@ -281,7 +421,7 @@ const Login: React.FC = () => {
             </>
           )}
 
-          {status === 'error' && loginType === 'mobile' && (
+          {loginError && type === 'mobile' && (
             <LoginMessage content="验证码错误" />
           )}
           {type === 'mobile' && (
@@ -354,13 +494,13 @@ const Login: React.FC = () => {
                   },
                 ]}
                 onGetCaptcha={async (phone) => {
-                  const result = await getFakeCaptcha({
-                    phone,
+                  const result = await sendSmsCode({
+                    mobile: phone,
+                    scene: 1, // 1=管理后台登录
                   });
-                  if (!result) {
-                    return;
+                  if (result.code === 0) {
+                    message.success('验证码发送成功');
                   }
-                  message.success('获取验证码成功！验证码为：1234');
                 }}
               />
             </>
@@ -390,6 +530,17 @@ const Login: React.FC = () => {
         </LoginForm>
       </div>
       <Footer />
+
+      {/* 图形验证码滑块组件 - 隐藏，通过 ref 调用 */}
+      <Captcha
+        ref={captchaRef}
+        onSuccess={handleCaptchaSuccess}
+        onFail={() => {
+          message.error('验证码验证失败');
+        }}
+        path={`${process.env.REACT_APP_API_URL || ''}/admin-api/system`}
+        type="auto"
+      />
     </div>
   );
 };

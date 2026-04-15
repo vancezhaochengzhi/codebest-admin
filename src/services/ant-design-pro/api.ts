@@ -2,27 +2,37 @@
 /* eslint-disable */
 import { request } from '@umijs/max';
 
-/** 获取当前的用户 GET /api/currentUser */
+/** 获取当前的用户权限信息 GET /admin-api/system/auth/get-permission-info */
 export async function currentUser(options?: { [key: string]: any }) {
-  return request<{
-    data: API.CurrentUser;
-  }>('/api/currentUser', {
+  return request<API.CommonResult<API.PermissionInfo>>('/admin-api/system/auth/get-permission-info', {
     method: 'GET',
     ...(options || {}),
   });
 }
 
-/** 退出登录接口 POST /api/login/outLogin */
+/** 退出登录接口 POST /admin-api/system/auth/logout */
 export async function outLogin(options?: { [key: string]: any }) {
-  return request<Record<string, any>>('/api/login/outLogin', {
+  return request<API.CommonResult<boolean>>('/admin-api/system/auth/logout', {
     method: 'POST',
     ...(options || {}),
   });
 }
 
-/** 登录接口 POST /api/login/account */
+/** 账号密码登录 POST /admin-api/system/auth/login */
 export async function login(body: API.LoginParams, options?: { [key: string]: any }) {
-  return request<API.LoginResult>('/api/login/account', {
+  return request<API.CommonResult<API.LoginResult>>('/admin-api/system/auth/login', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    data: body,
+    ...(options || {}),
+  });
+}
+
+/** 短信验证码登录 POST /admin-api/system/auth/sms-login */
+export async function smsLogin(body: API.SmsLoginParams, options?: { [key: string]: any }) {
+  return request<API.CommonResult<API.LoginResult>>('/admin-api/system/auth/sms-login', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -90,5 +100,42 @@ export async function removeRule(options?: { [key: string]: any }) {
       method: 'delete',
       ...(options || {}),
     },
+  });
+}
+
+/**
+ * 社交登录类型枚举（对应后端 SocialTypeEnum）
+ * 32 = 微信开放平台（PC 扫码）
+ * 40 = 支付宝小程序
+ * 50 = 新浪微博
+ */
+export const SocialType = {
+  WECHAT_OPEN: 32,
+  ALIPAY: 40,
+  WEIBO: 50,
+} as const;
+
+/** 获取社交登录授权 URL GET /admin-api/system/auth/social-auth-redirect */
+export async function socialAuthRedirect(
+  params: { type: number; redirectUri: string },
+  options?: { [key: string]: any },
+) {
+  return request<API.CommonResult<string>>('/admin-api/system/auth/social-auth-redirect', {
+    method: 'GET',
+    params,
+    ...(options || {}),
+  });
+}
+
+/** 社交快捷登录 POST /admin-api/system/auth/social-login */
+export async function socialLogin(
+  data: { type: number; code: string; state: string },
+  options?: { [key: string]: any },
+) {
+  return request<API.CommonResult<API.LoginResult>>('/admin-api/system/auth/social-login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    data,
+    ...(options || {}),
   });
 }
