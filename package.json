@@ -41,7 +41,7 @@
     "@antv/l7": "^2.22.7",
     "@antv/l7-react": "^2.4.3",
     "aj-captcha-react": "^1.3.4",
-    "antd": "^5.25.4",
+    "antd": "^6.3.5",
     "antd-style": "^3.7.0",
     "classnames": "^2.5.1",
     "dayjs": "^1.11.13",
